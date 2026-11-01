@@ -157,10 +157,11 @@ jobs:
           # Wait for the new application to respond successfully.
           HEALTHY=false
 
-          for attempt in $(seq 1 12); do
-            echo "Health check attempt $attempt of 12..."
+          for attempt in $(seq 1 24); do
+            echo "Health check attempt $attempt of 24..."
 
-            if curl -fsS --max-time 5 http://localhost/health >/dev/null; then
+            if curl -fsS --connect-timeout 3 --max-time 5 \
+                http://localhost/health; then
               HEALTHY=true
               break
             fi
