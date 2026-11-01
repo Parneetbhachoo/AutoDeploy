@@ -12,7 +12,7 @@ def home():
             <title>AutoDeploy</title>
         </head>
         <body>
-            <h1>Welcome to AutoDeploy!</h1>
+            <h1>Welcome to AutoDeploy CI/CD Platform!</h1>
             <p>Automated CI/CD with Failure Recovery</p>
             <p>Application is running successfully.</p>
         </body>
