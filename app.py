@@ -14,7 +14,6 @@ def home():
         <body>
             <h1>Welcome to AutoDeploy!</h1>
             <p>Automated CI/CD with Failure Recovery</p>
-            <p>Deployment pipeline powered by GitHub Actions and AWS.</p>
             <p>Application is running successfully.</p>
         </body>
     </html>
