@@ -1197,3 +1197,5 @@ def dashboard():
         .replace("__PROCESS_START_TIME__", PROCESS_START_TIME)
         .replace("{%DEPLOYMENT_CONTENT%}", deployment_html)
     )
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
