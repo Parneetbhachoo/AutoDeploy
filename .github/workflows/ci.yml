@@ -57,8 +57,14 @@ jobs:
         run: |
           set -euo pipefail
 
+          if [ -z "$EC2_INSTANCE_ID" ]; then
+            echo "ERROR: EC2_INSTANCE_ID secret is missing."
+            exit 1
+          fi
+
           COMMANDS=$(cat <<'SCRIPT'
           set -eu
+
           cd /home/ubuntu/AutoDeploy
 
           echo "Fetching latest source code..."
@@ -68,17 +74,74 @@ jobs:
           echo "Building candidate Docker image..."
           sudo docker build -t autodeploy:candidate .
 
+          HAD_PREVIOUS=false
+
+          # Remove the older backup only after the candidate image builds.
           if sudo docker inspect autodeploy-previous >/dev/null 2>&1; then
+            echo "Removing older rollback container..."
             sudo docker rm -f autodeploy-previous
           fi
 
-          HAD_PREVIOUS=false
-
+          # Preserve the current version before starting the candidate.
           if sudo docker inspect autodeploy-container >/dev/null 2>&1; then
-            sudo docker stop autodeploy-container
-            sudo docker rename autodeploy-container autodeploy-previous
+            echo "Stopping current application..."
+
+            if ! sudo docker stop autodeploy-container; then
+              echo "ERROR: Could not stop the current container."
+              exit 1
+            fi
+
+            if ! sudo docker rename autodeploy-container autodeploy-previous; then
+              echo "ERROR: Could not preserve the current container."
+              sudo docker start autodeploy-container || true
+              exit 1
+            fi
+
             HAD_PREVIOUS=true
           fi
+
+          rollback() {
+            echo "Deployment failed. Attempting rollback..."
+
+            # Remove the failed candidate, if it exists.
+            sudo docker rm -f autodeploy-container 2>/dev/null || true
+
+            if [ "$HAD_PREVIOUS" != true ]; then
+              echo "ERROR: No previous container is available to restore."
+              return 1
+            fi
+
+            if ! sudo docker inspect autodeploy-previous >/dev/null 2>&1; then
+              echo "ERROR: Previous container is missing."
+              return 1
+            fi
+
+            if ! sudo docker rename autodeploy-previous autodeploy-container; then
+              echo "ERROR: Could not rename the previous container."
+              return 1
+            fi
+
+            if ! sudo docker start autodeploy-container; then
+              echo "ERROR: Could not restart the previous container."
+              return 1
+            fi
+
+            # Allow the restored application time to become healthy.
+            for attempt in $(seq 1 6); do
+              if curl -fsS --max-time 5 http://localhost/health >/dev/null; then
+                echo "ROLLBACK SUCCESSFUL: Previous version is healthy."
+                return 0
+              fi
+
+              echo "Waiting for restored version: attempt $attempt of 6..."
+              sleep 2
+            done
+
+            echo "ERROR: Restored container failed its health check."
+            return 1
+          }
+
+          echo "Starting candidate container..."
 
           if ! sudo docker run -d \
             --name autodeploy-container \
@@ -86,60 +149,56 @@ jobs:
             --restart unless-stopped \
             autodeploy:candidate; then
 
-            sudo docker rm -f autodeploy-container 2>/dev/null || true
-
-            if [ "$HAD_PREVIOUS" = true ]; then
-              sudo docker rename autodeploy-previous autodeploy-container
-              sudo docker start autodeploy-container
-            fi
-
+            echo "ERROR: Candidate container could not start."
+            rollback || echo "CRITICAL: Automatic rollback failed."
             exit 1
           fi
 
+          # Wait for the new application to respond successfully.
           HEALTHY=false
 
           for attempt in $(seq 1 12); do
-            if curl -fsS http://localhost/health; then
+            echo "Health check attempt $attempt of 12..."
+
+            if curl -fsS --max-time 5 http://localhost/health >/dev/null; then
               HEALTHY=true
               break
             fi
+
             sleep 5
           done
 
-          if [ "$HEALTHY" = true ]; then
-            echo "Deployment successful."
-            if [ "$HAD_PREVIOUS" = true ]; then
-              echo "Previous container preserved as autodeploy-previous."
-            fi
-          else
-            echo "Health check failed. Rolling back."
-
-            sudo docker rm -f autodeploy-container 2>/dev/null || true
-
-            if [ "$HAD_PREVIOUS" = true ]; then
-              sudo docker rename autodeploy-previous autodeploy-container
-              sudo docker start autodeploy-container
-              curl -fsS http://localhost/health
-            fi
-
+          if [ "$HEALTHY" != true ]; then
+            echo "ERROR: Candidate failed its health check."
+            rollback || echo "CRITICAL: Automatic rollback failed."
             exit 1
           fi
+
+          echo "Deployment successful: candidate passed its health check."
+          echo "Previous version is preserved as autodeploy-previous."
+
+          echo "Final health response:"
+          curl -fsS http://localhost/health
           SCRIPT
           )
 
           PARAMS=$(jq -n --arg commands "$COMMANDS" \
             '{commands: [$commands]}')
 
+          echo "Sending deployment command to EC2..."
+
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "$EC2_INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
             --parameters "$PARAMS" \
+            --timeout-seconds 600 \
             --query 'Command.CommandId' \
             --output text)
 
           echo "SSM command ID: $COMMAND_ID"
 
-          for attempt in $(seq 1 30); do
+          # Wait up to 10 minutes for the remote command.
+          for attempt in $(seq 1 120); do
             STATUS=$(aws ssm get-command-invocation \
               --command-id "$COMMAND_ID" \
               --instance-id "$EC2_INSTANCE_ID" \
@@ -158,7 +217,7 @@ jobs:
                   --command-id "$COMMAND_ID" \
                   --instance-id "$EC2_INSTANCE_ID" \
                   --query '{Status:Status,Output:StandardOutputContent,Error:StandardErrorContent}' \
-                  --output json
+                  --output json || true
                 exit 1
                 ;;
             esac
@@ -166,7 +225,6 @@ jobs:
             sleep 5
           done
 
-          echo "Timed out waiting for the SSM command."
+          echo "ERROR: Timed out waiting for the SSM command."
+          echo "Check the command status in AWS Systems Manager before retrying."
           exit 1
-
-
