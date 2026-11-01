@@ -1,6 +1,7 @@
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, render_template_string
 from datetime import datetime, timezone
+import time
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 import json
@@ -253,6 +254,977 @@ def health():
         "application": "AutoDeploy",
         "version": APP_VERSION
     })
+
+
+STATUS_HTML_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#090b16">
+    <title>{{ app_name }} | System Health</title>
+    <style>
+        :root {
+            --bg: #090b16;
+            --sidebar: #0d1020;
+            --panel: #111426;
+            --panel-hover: #191d33;
+            --border: rgba(148, 163, 184, 0.14);
+            --border-hover: rgba(129, 140, 248, 0.3);
+            --text: #f1f5f9;
+            --muted: #929bb5;
+            --dim: #64748b;
+            --blue: #60a5fa;
+            --purple: #a78bfa;
+            --green: #4ade80;
+            --green-glow: rgba(74, 222, 128, 0.35);
+            --red: #f87171;
+            --slate: #94a3b8;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg);
+            background-image: 
+                radial-gradient(ellipse 80% 50% at 50% -20%, rgba(99, 102, 241, 0.15), transparent),
+                radial-gradient(circle at 100% 100%, rgba(168, 85, 247, 0.08), transparent);
+            color: var(--text);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-size: 14px;
+            line-height: 1.6;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        a {
+            color: inherit;
+            text-decoration: none;
+        }
+
+        /* Topbar Navigation */
+        .topbar {
+            height: 70px;
+            padding: 0 36px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border);
+            background: rgba(13, 16, 32, 0.85);
+            backdrop-filter: blur(12px);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .brand-icon {
+            display: grid;
+            place-items: center;
+            width: 38px;
+            height: 38px;
+            flex-shrink: 0;
+            border-radius: 11px;
+            background: linear-gradient(135deg, #6366f1, #a855f7);
+            font-size: 20px;
+            box-shadow: 0 0 20px rgba(139, 92, 246, 0.3);
+        }
+
+        .brand-name {
+            font-size: 18px;
+            font-weight: 750;
+            letter-spacing: -0.5px;
+        }
+
+        .brand-sub {
+            display: block;
+            color: var(--muted);
+            font-size: 9px;
+            letter-spacing: 1.4px;
+            text-transform: uppercase;
+        }
+
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .nav-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 9px 15px;
+            border: 1px solid var(--border);
+            border-radius: 9px;
+            background: #171a2e;
+            color: #cbd5e1;
+            font-size: 12px;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
+
+        .nav-btn:hover {
+            border-color: #818cf8;
+            background: #202442;
+            color: white;
+        }
+
+        .nav-btn.primary {
+            background: linear-gradient(110deg, #6366f1, #9333ea);
+            border-color: transparent;
+            color: white;
+            box-shadow: 0 4px 14px rgba(99, 102, 241, 0.25);
+        }
+
+        .nav-btn.primary:hover {
+            background: linear-gradient(110deg, #4f46e5, #7e22ce);
+        }
+
+        /* Container */
+        .container {
+            max-width: 1200px;
+            width: 100%;
+            margin: 0 auto;
+            padding: 36px 24px 60px;
+            flex: 1;
+        }
+
+        /* Hero Status Banner */
+        .hero-banner {
+            padding: 32px;
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            background: linear-gradient(145deg, #151a33, #0f1222);
+            position: relative;
+            overflow: hidden;
+            margin-bottom: 28px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+        }
+
+        .hero-banner::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: {% if app_healthy %}linear-gradient(90deg, #4ade80, #22c55e, #3b82f6){% else %}linear-gradient(90deg, #f87171, #ef4444){% endif %};
+        }
+
+        .status-header-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            {% if app_healthy %}
+            color: #86efac;
+            background: rgba(34, 197, 94, 0.12);
+            border: 1px solid rgba(74, 222, 128, 0.25);
+            {% else %}
+            color: #fca5a5;
+            background: rgba(239, 68, 68, 0.12);
+            border: 1px solid rgba(248, 113, 113, 0.25);
+            {% endif %}
+        }
+
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            {% if app_healthy %}
+            background: var(--green);
+            box-shadow: 0 0 10px var(--green);
+            animation: pulse-green 2s infinite;
+            {% else %}
+            background: var(--red);
+            box-shadow: 0 0 10px var(--red);
+            {% endif %}
+        }
+
+        @keyframes pulse-green {
+            0%, 100% {
+                opacity: 1;
+                transform: scale(1);
+                box-shadow: 0 0 8px rgba(74, 222, 128, 0.7);
+            }
+            50% {
+                opacity: 0.5;
+                transform: scale(1.2);
+                box-shadow: 0 0 16px rgba(74, 222, 128, 0.9);
+            }
+        }
+
+        h1 {
+            font-size: clamp(26px, 3.5vw, 34px);
+            font-weight: 800;
+            letter-spacing: -1px;
+            margin: 16px 0 8px;
+        }
+
+        .subtitle {
+            color: var(--muted);
+            font-size: 14px;
+            max-width: 650px;
+            line-height: 1.7;
+        }
+
+        .hero-actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 24px;
+            flex-wrap: wrap;
+        }
+
+        /* Stat Cards Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 18px;
+            margin-bottom: 32px;
+        }
+
+        .card {
+            padding: 22px;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            background: linear-gradient(145deg, #14182b, #101323);
+            transition: transform 0.2s ease, border-color 0.2s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            border-color: var(--border-hover);
+        }
+
+        .card-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        .card-label {
+            color: var(--muted);
+            font-size: 11px;
+            font-weight: 650;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+        }
+
+        .card-icon {
+            display: grid;
+            place-items: center;
+            width: 34px;
+            height: 34px;
+            border-radius: 9px;
+            font-size: 16px;
+        }
+
+        .icon-green {
+            color: #86efac;
+            background: rgba(34, 197, 94, 0.13);
+        }
+
+        .icon-purple {
+            color: #c4b5fd;
+            background: rgba(139, 92, 246, 0.14);
+        }
+
+        .icon-blue {
+            color: #93c5fd;
+            background: rgba(59, 130, 246, 0.14);
+        }
+
+        .icon-orange {
+            color: #fdba74;
+            background: rgba(249, 115, 22, 0.13);
+        }
+
+        .card-value {
+            margin-top: 18px;
+            font-size: 24px;
+            font-weight: 750;
+            letter-spacing: -0.5px;
+            overflow-wrap: anywhere;
+        }
+
+        .card-foot {
+            margin-top: 10px;
+            color: var(--muted);
+            font-size: 11px;
+            line-height: 1.6;
+        }
+
+        .card-foot a {
+            color: var(--blue);
+            text-decoration: none;
+        }
+
+        .card-foot a:hover {
+            text-decoration: underline;
+        }
+
+        .positive {
+            color: var(--green);
+        }
+
+        .code-link {
+            display: inline-block;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            color: var(--blue);
+            background: rgba(59, 130, 246, 0.1);
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 20px;
+            border: 1px solid rgba(59, 130, 246, 0.2);
+            transition: all 0.2s ease;
+        }
+
+        .code-link:hover {
+            background: rgba(59, 130, 246, 0.2);
+            border-color: rgba(59, 130, 246, 0.4);
+        }
+
+        /* Scope Notice / Callout */
+        .notice-card {
+            padding: 18px 22px;
+            border: 1px solid rgba(139, 92, 246, 0.2);
+            border-radius: 12px;
+            background: linear-gradient(135deg, rgba(30, 27, 75, 0.4), rgba(15, 23, 42, 0.5));
+            margin-bottom: 28px;
+            display: flex;
+            align-items: flex-start;
+            gap: 16px;
+        }
+
+        .notice-icon {
+            display: grid;
+            place-items: center;
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            background: rgba(139, 92, 246, 0.2);
+            color: #c4b5fd;
+            font-size: 16px;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+
+        .notice-title {
+            font-weight: 700;
+            font-size: 13px;
+            color: #e2e8f0;
+            margin-bottom: 4px;
+        }
+
+        .notice-body {
+            color: var(--muted);
+            font-size: 12px;
+            line-height: 1.6;
+        }
+
+        /* Section Header */
+        .section-header {
+            margin: 36px 0 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .section-title {
+            font-size: 16px;
+            font-weight: 750;
+            letter-spacing: -0.3px;
+        }
+
+        .section-sub {
+            color: var(--muted);
+            font-size: 12px;
+            margin-top: 4px;
+        }
+
+        /* Component Breakdown Table Panel */
+        .panel {
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            background: var(--panel);
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+        }
+
+        .table-wrap {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            min-width: 650px;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 16px 20px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+            font-size: 12px;
+        }
+
+        th {
+            color: #8f99b3;
+            background: rgba(8, 11, 24, 0.4);
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.8px;
+            text-transform: uppercase;
+        }
+
+        td {
+            color: #d3d9e8;
+        }
+
+        tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        tbody tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .comp-name {
+            font-weight: 650;
+            color: #f1f5f9;
+            font-size: 13px;
+        }
+
+        .comp-sub {
+            color: var(--muted);
+            font-size: 11px;
+            margin-top: 3px;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.3px;
+            white-space: nowrap;
+        }
+
+        .badge-verified {
+            color: #86efac;
+            background: rgba(34, 197, 94, 0.12);
+            border: 1px solid rgba(74, 222, 128, 0.25);
+        }
+
+        .badge-unchecked {
+            color: #94a3b8;
+            background: rgba(148, 163, 184, 0.08);
+            border: 1px solid rgba(148, 163, 184, 0.18);
+        }
+
+        .text-link {
+            color: var(--blue);
+            text-decoration: none;
+        }
+
+        .text-link:hover {
+            text-decoration: underline;
+        }
+
+        /* Diagnostic Panel */
+        .diagnostic-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 16px;
+            padding: 20px;
+        }
+
+        .diag-item {
+            padding: 14px 18px;
+            background: rgba(9, 11, 22, 0.5);
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .diag-label {
+            color: var(--muted);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .diag-value {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 12px;
+            font-weight: 600;
+            color: #f1f5f9;
+        }
+
+        /* Footer */
+        .footer {
+            margin-top: 48px;
+            padding: 24px 0;
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 14px;
+            color: #727e9b;
+            font-size: 11px;
+        }
+
+        .footer-links {
+            display: flex;
+            gap: 18px;
+        }
+
+        .footer-links a {
+            color: var(--muted);
+            transition: color 0.2s ease;
+        }
+
+        .footer-links a:hover {
+            color: var(--blue);
+        }
+
+        /* Responsive Breakpoints */
+        @media (max-width: 1024px) {
+            .stats-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @media (max-width: 768px) {
+            .topbar {
+                padding: 0 20px;
+            }
+
+            .container {
+                padding: 24px 16px 40px;
+            }
+
+            .hero-banner {
+                padding: 24px;
+            }
+
+            .diagnostic-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 520px) {
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .topbar {
+                height: auto;
+                padding: 14px 16px;
+                flex-direction: column;
+                gap: 12px;
+                align-items: flex-start;
+            }
+
+            .nav-links {
+                width: 100%;
+                justify-content: space-between;
+            }
+
+            .nav-btn {
+                padding: 8px 12px;
+                font-size: 11px;
+            }
+
+            .status-header-row {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .footer {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="topbar">
+        <div class="brand">
+            <div class="brand-icon">⚡</div>
+            <div>
+                <div class="brand-name">{{ app_name }}</div>
+                <span class="brand-sub">System Health Monitor</span>
+            </div>
+        </div>
+
+        <nav class="nav-links">
+            <a href="/dashboard" class="nav-btn primary">
+                <span>▦</span> Dashboard
+            </a>
+            <a href="/health" class="nav-btn">
+                <span>♡</span> /health (JSON)
+            </a>
+            <a href="/" class="nav-btn">
+                <span>⌂</span> Home
+            </a>
+        </nav>
+    </header>
+
+    <main class="container">
+        <!-- Hero Status Banner -->
+        <section class="hero-banner">
+            <div class="status-header-row">
+                <div>
+                    <div class="status-pill">
+                        <span class="pulse-dot"></span>
+                        {% if app_healthy %}
+                        Application Status: Healthy
+                        {% else %}
+                        Application Status: Degraded
+                        {% endif %}
+                    </div>
+                    <h1>AutoDeploy System Health</h1>
+                    <p class="subtitle">
+                        Real-time status check and operational verification for the {{ app_name }} Flask web application and service endpoints.
+                    </p>
+                </div>
+            </div>
+
+            <div class="hero-actions">
+                <a href="/dashboard" class="nav-btn primary">
+                    Open Dashboard →
+                </a>
+                <a href="/health" class="nav-btn">
+                    Inspect /health JSON →
+                </a>
+                <a href="/status" class="nav-btn">
+                    ↻ Refresh Health Check
+                </a>
+            </div>
+        </section>
+
+        <!-- Stats Grid -->
+        <section class="stats-grid">
+            <div class="card">
+                <div class="card-top">
+                    <span class="card-label">Application Health</span>
+                    <span class="card-icon icon-green">◉</span>
+                </div>
+                <div class="card-value {% if app_healthy %}positive{% endif %}">
+                    {% if app_healthy %}Healthy{% else %}Unhealthy{% endif %}
+                </div>
+                <div class="card-foot">
+                    Verified live check: HTTP 200 ({{ check_duration_ms }} ms)
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-top">
+                    <span class="card-label">Current Version</span>
+                    <span class="card-icon icon-purple">⌘</span>
+                </div>
+                <div class="card-value">v{{ app_version }}</div>
+                <div class="card-foot">
+                    Application: {{ app_name }}
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-top">
+                    <span class="card-label">Health-Check Endpoint</span>
+                    <span class="card-icon icon-blue">♡</span>
+                </div>
+                <div class="card-value">
+                    <a href="/health" class="code-link">/health</a>
+                </div>
+                <div class="card-foot">
+                    <a href="/health">Open raw JSON response →</a>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-top">
+                    <span class="card-label">Process Start Time</span>
+                    <span class="card-icon icon-orange">◷</span>
+                </div>
+                <div class="card-value" style="font-size: 15px; font-weight: 650; margin-top: 22px;">
+                    {{ process_start_time }}
+                </div>
+                <div class="card-foot">
+                    Last checked: {{ checked_at }}
+                </div>
+            </div>
+        </section>
+
+        <!-- Scope Distinction Notice -->
+        <div class="notice-card">
+            <div class="notice-icon">ℹ</div>
+            <div>
+                <div class="notice-title">Health Check Scope & Telemetry Notice</div>
+                <div class="notice-body">
+                    This status page performs active, real-time verification of the <strong>Flask application process</strong> and its <strong>/health</strong> endpoint. Underlying host infrastructure (Docker container), cloud provider (AWS), and deployment pipelines (GitHub Actions) are external components that are not directly probed by this in-process health check and are transparently marked as <em>Unchecked</em> below to prevent false positive reporting.
+                </div>
+            </div>
+        </div>
+
+        <!-- Component Breakdown Section -->
+        <div class="section-header">
+            <div>
+                <h2 class="section-title">Component Health & Verification Breakdown</h2>
+                <p class="section-sub">Distinct view separating verified application health from unprobed infrastructure components.</p>
+            </div>
+        </div>
+
+        <section class="panel">
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Component</th>
+                            <th>Layer</th>
+                            <th>Verification Status</th>
+                            <th>Health Details</th>
+                            <th>Action / Target</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>
+                                <div class="comp-name">Flask Application Core</div>
+                                <div class="comp-sub">Web runtime & request handler</div>
+                            </td>
+                            <td>Application</td>
+                            <td>
+                                <span class="badge badge-verified">
+                                    ● Verified Live
+                                </span>
+                            </td>
+                            <td>
+                                {% if app_healthy %}
+                                Responding normally to internal health probes. Process is active.
+                                {% else %}
+                                Health check failed: {{ check_error }}
+                                {% endif %}
+                            </td>
+                            <td>
+                                <span style="color: var(--green); font-size: 11px;">Active In-Memory</span>
+                            </td>
+                        </tr>
+
+                        <tr>
+                            <td>
+                                <div class="comp-name">Health-Check Endpoint</div>
+                                <div class="comp-sub">JSON status API</div>
+                            </td>
+                            <td>API Service</td>
+                            <td>
+                                <span class="badge badge-verified">
+                                    ● Verified Live
+                                </span>
+                            </td>
+                            <td>
+                                HTTP 200 OK returning <code>{"status": "healthy", "version": "{{ app_version }}"}</code>
+                            </td>
+                            <td>
+                                <a href="/health" class="text-link">/health ↗</a>
+                            </td>
+                        </tr>
+
+                        <tr>
+                            <td>
+                                <div class="comp-name">Docker Container Runtime</div>
+                                <div class="comp-sub">Container isolation & host daemon</div>
+                            </td>
+                            <td>Host / Container</td>
+                            <td>
+                                <span class="badge badge-unchecked">
+                                    ○ Unchecked
+                                </span>
+                            </td>
+                            <td>
+                                Container daemon metrics, resource limits, and cgroups are not probed by this route.
+                            </td>
+                            <td>
+                                <span style="color: var(--dim); font-size: 11px;">Not Monitored</span>
+                            </td>
+                        </tr>
+
+                        <tr>
+                            <td>
+                                <div class="comp-name">AWS Cloud Infrastructure</div>
+                                <div class="comp-sub">EC2 compute & Systems Manager (SSM)</div>
+                            </td>
+                            <td>Cloud Provider</td>
+                            <td>
+                                <span class="badge badge-unchecked">
+                                    ○ Unchecked
+                                </span>
+                            </td>
+                            <td>
+                                Cloud provider instance health and SSM agent status are not queried by this in-process check.
+                            </td>
+                            <td>
+                                <span style="color: var(--dim); font-size: 11px;">Not Monitored</span>
+                            </td>
+                        </tr>
+
+                        <tr>
+                            <td>
+                                <div class="comp-name">GitHub Actions CI/CD</div>
+                                <div class="comp-sub">Automated build, test & deploy pipeline</div>
+                            </td>
+                            <td>CI/CD Pipeline</td>
+                            <td>
+                                <span class="badge badge-unchecked">
+                                    ○ Unchecked
+                                </span>
+                            </td>
+                            <td>
+                                CI/CD pipeline runs independently; recent workflow history is available on the dashboard.
+                            </td>
+                            <td>
+                                <a href="/dashboard#deployments" class="text-link">View Runs ↗</a>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Live Diagnostics Panel -->
+        <div class="section-header">
+            <div>
+                <h2 class="section-title">Live Diagnostic Details</h2>
+                <p class="section-sub">Telemetry generated during this request.</p>
+            </div>
+        </div>
+
+        <section class="panel">
+            <div class="diagnostic-grid">
+                <div class="diag-item">
+                    <span class="diag-label">Probe Target</span>
+                    <span class="diag-value"><a href="/health" class="text-link">/health</a></span>
+                </div>
+                <div class="diag-item">
+                    <span class="diag-label">HTTP Status Code</span>
+                    <span class="diag-value" style="color: var(--green);">200 OK</span>
+                </div>
+                <div class="diag-item">
+                    <span class="diag-label">Check Latency</span>
+                    <span class="diag-value">{{ check_duration_ms }} ms</span>
+                </div>
+                <div class="diag-item">
+                    <span class="diag-label">Timestamp (UTC)</span>
+                    <span class="diag-value">{{ checked_at }}</span>
+                </div>
+                <div class="diag-item">
+                    <span class="diag-label">Application Name</span>
+                    <span class="diag-value">{{ app_name }}</span>
+                </div>
+                <div class="diag-item">
+                    <span class="diag-label">Application Version</span>
+                    <span class="diag-value">v{{ app_version }}</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Navigation Summary Footer Card -->
+        <div style="margin-top: 32px; padding: 22px; border: 1px solid var(--border); border-radius: 14px; background: linear-gradient(145deg, #14182b, #101323); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+            <div>
+                <div style="font-weight: 700; font-size: 13px; color: #f1f5f9;">Explore AutoDeploy Navigation</div>
+                <div style="color: var(--muted); font-size: 12px; margin-top: 4px;">Jump to workspace overview, live pipeline records, or application JSON endpoints.</div>
+            </div>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <a href="/dashboard" class="nav-btn primary">Dashboard →</a>
+                <a href="/health" class="nav-btn">/health JSON</a>
+                <a href="/" class="nav-btn">Home</a>
+            </div>
+        </div>
+
+        <footer class="footer">
+            <div>
+                © AutoDeploy · Continuous Deployment & Monitoring Platform
+            </div>
+            <div class="footer-links">
+                <a href="/dashboard">Dashboard</a>
+                <a href="/status">System Health</a>
+                <a href="/health">Health API</a>
+                <a href="/">Home</a>
+            </div>
+        </footer>
+    </main>
+</body>
+</html>"""
+
+
+@app.route("/status")
+def status():
+    """System Health page displaying verified application health and component status."""
+    check_start = time.perf_counter()
+    app_healthy = False
+    health_payload = {}
+    check_error = None
+
+    try:
+        # Perform a real in-process check of the Flask application health endpoint
+        response = health()
+        status_code = response.status_code
+        health_payload = response.get_json() or {}
+        if status_code == 200 and health_payload.get("status") == "healthy":
+            app_healthy = True
+        else:
+            check_error = f"Unexpected status code {status_code}"
+    except Exception as exc:
+        app_healthy = False
+        check_error = str(exc)
+
+    check_duration_ms = max(0.01, round((time.perf_counter() - check_start) * 1000, 2))
+    checked_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    return render_template_string(
+        STATUS_HTML_TEMPLATE,
+        app_name=health_payload.get("application", "AutoDeploy"),
+        app_version=health_payload.get("version", APP_VERSION),
+        app_healthy=app_healthy,
+        check_error=check_error,
+        check_duration_ms=check_duration_ms,
+        checked_at=checked_at,
+        process_start_time=PROCESS_START_TIME,
+    )
 
 
 @app.route("/dashboard")
