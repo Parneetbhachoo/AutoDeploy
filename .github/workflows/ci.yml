@@ -108,9 +108,8 @@ jobs:
 
           if [ "$HEALTHY" = true ]; then
             echo "Deployment successful."
-
             if [ "$HAD_PREVIOUS" = true ]; then
-              sudo docker rm -f autodeploy-previous
+              echo "Previous container preserved as autodeploy-previous."
             fi
           else
             echo "Health check failed. Rolling back."
