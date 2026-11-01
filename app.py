@@ -235,8 +235,8 @@ def home():
     <body>
         <main class="hero">
             <div class="logo">⚡ AutoDeploy Platform</div>
-            <h1>Welcome to AutoDeploy CI/CD Platform! version 2</h1>
-            <p>Ship smarter. Deploy with confidence.</p>            <p>
+            <h1>Welcome to AutoDeploy CI/CD Platform!</h1>
+            <p>
                 Automated CI/CD, containerized deployments, health monitoring,
                 and deployment failure recovery — powered by AWS and GitHub Actions.
             </p>
