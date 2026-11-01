@@ -44,7 +44,11 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ap-south-1
+          role-session-name: AutoDeployGitHubActions
+
+      - name: Verify AWS Identity
+        run: aws sts get-caller-identity
 
       - name: Deploy Through Systems Manager
         env:
@@ -64,7 +68,6 @@ jobs:
           echo "Building candidate Docker image..."
           sudo docker build -t autodeploy:candidate .
 
-          # Preserve the current working container.
           if sudo docker inspect autodeploy-previous >/dev/null 2>&1; then
             sudo docker rm -f autodeploy-previous
           fi
@@ -77,7 +80,6 @@ jobs:
             HAD_PREVIOUS=true
           fi
 
-          # Start the candidate version.
           if ! sudo docker run -d \
             --name autodeploy-container \
             -p 80:5000 \
@@ -94,7 +96,6 @@ jobs:
             exit 1
           fi
 
-          # Check the application's health endpoint.
           HEALTHY=false
 
           for attempt in $(seq 1 12); do
@@ -107,6 +108,7 @@ jobs:
 
           if [ "$HEALTHY" = true ]; then
             echo "Deployment successful."
+
             if [ "$HAD_PREVIOUS" = true ]; then
               sudo docker rm -f autodeploy-previous
             fi
@@ -167,4 +169,5 @@ jobs:
 
           echo "Timed out waiting for the SSM command."
           exit 1
+
 
